@@ -2,32 +2,32 @@
 
 /**
  * @file
- * Google Gemini AI provider integration for the OpenAI module.
+ * Google Gemini AI provider integration for the AI module.
  *
  * This module enables using Google Gemini AI models through the
- * OpenAI module's unified provider interface.
+ * AI module's unified provider interface.
  */
 
 /**
  * Implements hook_autoload_info().
  */
-function openai_google_gemini_autoload_info() {
+function ai_provider_google_gemini_autoload_info() {
   return [
-    'GoogleGeminiAdapter' => 'includes/GoogleGeminiAdapter.php',
+    'AIGoogleGeminiAdapter' => 'includes/AIGoogleGeminiAdapter.php',
   ];
 }
 
 /**
- * Implements hook_openai_provider_info().
+ * Implements hook_ai_provider_info().
  *
  * Registers Google Gemini as an available AI provider.
  */
-function openai_google_gemini_openai_provider_info() {
+function ai_provider_google_gemini_ai_provider_info() {
   return [
     'google_gemini' => [
-      'label' => t('Google'),
+      'label' => t('Google Gemini'),
       'description' => t('Use Google Gemini AI models with multimodal support and advanced reasoning.'),
-      'class' => 'GoogleGeminiAdapter',
+      'class' => 'AIGoogleGeminiAdapter',
       'website' => 'https://gemini.google.com/',
       'key_url' => 'https://aistudio.google.com/app/apikeys',
       'models_url' => 'https://ai.google.dev/models',
@@ -36,11 +36,11 @@ function openai_google_gemini_openai_provider_info() {
 }
 
 /**
- * Implements hook_openai_provider_settings_alter().
+ * Implements hook_ai_provider_settings_alter().
  *
- * Adds Google Gemini-specific settings to the OpenAI module settings form.
+ * Adds Google Gemini-specific settings to the AI module settings form.
  */
-function openai_google_gemini_openai_provider_settings_alter(&$settings, $context) {
+function ai_provider_google_gemini_ai_provider_settings_alter(&$settings, $context) {
   // Only add settings if Gemini is the selected provider
   if ($context['provider'] !== 'google_gemini') {
     return;
@@ -51,7 +51,7 @@ function openai_google_gemini_openai_provider_settings_alter(&$settings, $contex
     : [];
 
   // Use central providers mapping so the default reflects saved provider config.
-  $providers_root = config_get('openai.settings', 'providers') ?: [];
+  $providers_root = config_get('ai.settings', 'providers') ?: [];
   $default_key = !empty($providers_root['google_gemini']['api_key']) ? $providers_root['google_gemini']['api_key'] : '';
 
   $settings['api_key_google_gemini'] = [
@@ -72,24 +72,24 @@ function openai_google_gemini_openai_provider_settings_alter(&$settings, $contex
       <ul>
         <li><strong>gemini-2.0-flash</strong> - Latest and fastest model. Recommended for most use cases.</li>
         <li><strong>gemini-1.5-pro</strong> - Most capable model. Supports up to 1M tokens context. Best for complex reasoning and analysis.</li>
-        <li><strong>gemini-1.5-flash</strong> - Fast and efficient. Good balance of speed and capability.</li>
+        <li><strong>nano-banana-2 / Imagen 3</strong> - State-of-the-art native image generation and editing.</li>
       </ul>
       <p><strong>Free Tier:</strong> Gemini has a generous free tier with rate limits. See pricing page for details.</p>
-      <p><strong>Features:</strong> Supports text, vision (images), audio, and video inputs.</p>
+      <p><strong>Features:</strong> Supports text, vision (multimodal), image generation (Nano Banana), audio, and video inputs.</p>
       <p><a href="https://ai.google.dev/models" target="_blank">Browse all available models and pricing</a></p>') .
       '</div>',
     '#weight' => -4,
   ];
 
   if (isset($context['form'])) {
-    $context['form']['#submit'][] = 'openai_google_gemini_provider_settings_submit';
+    $context['form']['#submit'][] = 'ai_provider_google_gemini_provider_settings_submit';
   }
 }
 
 /**
  * Submit handler for Google Gemini provider settings.
  */
-function openai_google_gemini_provider_settings_submit($form, &$form_state) {
+function ai_provider_google_gemini_provider_settings_submit($form, &$form_state) {
   // Any custom Gemini-specific processing can go here
-  // Currently delegated to main openai_settings_form_submit
+  // Currently delegated to main ai_settings_form_submit
 }

@@ -1,6 +1,6 @@
-# OpenAI Google Gemini
+# AI Provider Google Gemini
 
-Google Gemini provider for the Backdrop CMS OpenAI module.
+Google Gemini provider for the Backdrop CMS AI module.
 
 ## Installation
 
@@ -8,7 +8,7 @@ Google Gemini provider for the Backdrop CMS OpenAI module.
 
 ## Issues
 
-Bugs and feature requests should be reported in the [Issue Queue](https://github.com/backdrop-contrib/openai_google_gemini/issues).
+Bugs and feature requests should be reported in the [Issue Queue](https://github.com/backdrop-contrib/ai_provider_google gemini/issues).
 
 ## Current Maintainer
 
@@ -17,6 +17,8 @@ Bugs and feature requests should be reported in the [Issue Queue](https://github
 ## Credits
 
 - Created for Backdrop CMS by [Justin Keiser](https://github.com/keiserjb).
+
+- Developed with AI assistance.
 
 ## License
 

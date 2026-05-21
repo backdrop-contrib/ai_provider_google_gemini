@@ -1,0 +1,42 @@
+<?php
+
+/**
+ * Implements hook_install().
+ */
+function ai_provider_google_gemini_install() {
+  if (!module_load_install('ai_upgrade')) { return []; }
+  ai_upgrade_module_install('ai_provider_google_gemini');
+}
+
+/**
+ * Migrate legacy provider config from openai_google_gemini to ai_provider_google_gemini.
+ */
+function ai_provider_google_gemini_update_1000() {
+  $old_config_name = 'openai_google_gemini.settings';
+  $new_config_name = 'ai_provider_google_gemini.settings';
+
+  $old = config($old_config_name);
+  $data = $old->get();
+
+  if (!empty($data)) {
+    $new = config($new_config_name);
+    $data['_config_name'] = $new_config_name;
+    $new->setData($data);
+    $new->save();
+    $old->delete();
+  }
+
+  if (module_exists('openai_google_gemini')) {
+    module_disable(['openai_google_gemini']);
+  }
+
+  return t('Migrated legacy google_gemini configuration to AI provider google_gemini.');
+}
+
+/**
+ * Implements hook_requirements().
+ */
+function ai_provider_google_gemini_requirements($phase) {
+  if (!module_load_install('ai_upgrade')) { return []; }
+  return ai_upgrade_module_requirements($phase, 'ai_provider_google_gemini');
+}
