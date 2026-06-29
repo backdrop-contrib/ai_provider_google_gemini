@@ -13,7 +13,7 @@
 class AIGoogleGeminiAdapter extends AIAdapterBase {
 
   /** @var string */
-  protected $baseUrl = 'https://generativelanguage.googleapis.com/v1beta/ai/';
+  protected $baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai/';
 
   public function __construct($api_key, ?AIApi $api = NULL) {
     parent::__construct($api_key, $api);
@@ -25,7 +25,7 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
    * Gemini's native generateContent endpoint authenticates via a URL query
    * parameter (?key=...), so no Authorization header is needed by default.
    * The chat-compatible endpoint (used by chatWithTools) passes the key as
-   * a Bearer token via an extra_headers argument to dispatch().
+   * a Bearer token via an extra_headers argument to makeRequest().
    */
   protected function getDefaultHeaders(): array {
     return [];
@@ -228,6 +228,34 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
           'temperature' => (float) $temperature,
         ],
       ];
+      // The native generateContent API has no 'system' message role;
+      // convertMessagesGemini() skips them, so route system messages into
+      // the top-level systemInstruction field instead of dropping them.
+      $system_texts = [];
+      foreach ($messages as $msg) {
+        if (($msg['role'] ?? '') !== 'system') {
+          continue;
+        }
+        $content = $msg['content'] ?? '';
+        if (is_array($content)) {
+          foreach ($content as $block) {
+            if (is_string($block)) {
+              $system_texts[] = $block;
+            }
+            elseif (is_array($block) && ($block['type'] ?? '') === 'text') {
+              $system_texts[] = (string) ($block['text'] ?? '');
+            }
+          }
+        }
+        else {
+          $system_texts[] = (string) $content;
+        }
+      }
+      if ($system_texts) {
+        $body['systemInstruction'] = [
+          'parts' => [['text' => implode("\n\n", $system_texts)]],
+        ];
+      }
       // Normalize the incoming model identifier into the Gemini resource
       // format the API expects (e.g. "models/gemini-1.5-pro"). The model
       // string may come in several shapes depending on the higher-level UI
@@ -263,7 +291,8 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
       ], WATCHDOG_DEBUG);
 
       try {
-        $response = $this->makeRequest($url, $body);
+        // Long generations can exceed the 30s makeRequest() default.
+        $response = $this->makeRequest($url, $body, [], 'POST', 300);
       }
       catch (\Exception $e) {
         $msg = $e->getMessage();
@@ -278,7 +307,7 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
 
           try {
             watchdog('ai_provider_google_gemini', 'Retrying Gemini generateContent via models:generateContent with model=@m', ['@m' => $resource], WATCHDOG_DEBUG);
-            $response = $this->makeRequest($alt_url, $body_with_model);
+            $response = $this->makeRequest($alt_url, $body_with_model, [], 'POST', 300);
           }
           catch (\Exception $e2) {
             // As a last-ditch attempt, try the bare model id (without 'models/').
@@ -286,7 +315,7 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
             $body_with_model['model'] = $bare;
             try {
               watchdog('ai_provider_google_gemini', 'Retrying Gemini generateContent with bare model=@m', ['@m' => $bare], WATCHDOG_DEBUG);
-              $response = $this->makeRequest($alt_url, $body_with_model);
+              $response = $this->makeRequest($alt_url, $body_with_model, [], 'POST', 300);
             }
             catch (\Exception $e3) {
               // Log all three failures and rethrow the last exception.
@@ -406,7 +435,8 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
         ],
       ];
 
-      $response = $this->makeRequest($url, $body);
+      // Image generation regularly takes longer than 30 seconds.
+      $response = $this->makeRequest($url, $body, [], 'POST', 300);
 
       $images = [];
       if (!empty($response['candidates'][0]['content']['parts'])) {
@@ -509,34 +539,48 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
    * {@inheritdoc}
    */
   public function embeddings(string $model, array $inputs, string $response_format = 'float'): array {
+    if ($response_format !== 'float') {
+      throw new \InvalidArgumentException('AIGoogleGeminiAdapter::embeddings() only supports response_format "float"; "' . $response_format . '" is not supported.');
+    }
     try {
-      // Google Gemini supports embeddings via the embedding API
-      $embedding_model = 'embedding-001';
+      // Use the native embedContent endpoint; the body below is the native
+      // shape (content.parts.text), not the OpenAI-compatible one.
+      $embedding_model = $model ?: 'gemini-embedding-2';
+      if (strpos($embedding_model, 'models/') !== FALSE) {
+        $embedding_model = substr($embedding_model, strpos($embedding_model, 'models/') + strlen('models/'));
+      }
+      elseif (strpos($embedding_model, '/') !== FALSE) {
+        $embedding_model = substr($embedding_model, strrpos($embedding_model, '/') + 1);
+      }
       $results = [];
 
-      $url = $this->baseUrl . 'embeddings?key=' . urlencode($this->apiKey);
+      $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . $embedding_model . ':batchEmbedContents?key=' . urlencode($this->apiKey);
 
-      foreach ($inputs as $index => $input) {
-        $body = [
-          'model' => $embedding_model,
+      $requests = [];
+      foreach ($inputs as $input) {
+        $requests[] = [
+          'model' => 'models/' . $embedding_model,
           'content' => [
             'parts' => [
-              [
-                'text' => $input,
-              ],
+              ['text' => $input],
             ],
           ],
         ];
+      }
 
-        $response = $this->makeRequest($url, $body);
+      $response = $this->makeRequest($url, ['requests' => $requests], [], 'POST', 300);
 
-        if (isset($response['embedding']['values'])) {
-          $results[] = [
-            'object' => 'embedding',
-            'embedding' => $response['embedding']['values'],
-            'index' => $index,
-          ];
+      $seq = 0;
+      foreach ($inputs as $index => $input) {
+        if (!isset($response['embeddings'][$seq]['values']) || !is_array($response['embeddings'][$seq]['values'])) {
+          throw new \Exception('Gemini batchEmbedContents response missing vector for input index ' . $index . ' (request position ' . $seq . ')');
         }
+        $results[] = [
+          'object' => 'embedding',
+          'embedding' => $response['embeddings'][$seq]['values'],
+          'index' => $index,
+        ];
+        $seq++;
       }
 
       return [
@@ -668,7 +712,19 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
 
     // Treat any 2xx as success.
     if ($code >= 200 && $code < 300) {
-      return json_decode($body_text, TRUE);
+      if (is_array($body_text) || is_object($body_text)) {
+        // JSON round-trip normalizes nested stdClass objects to arrays.
+        return json_decode(json_encode($body_text), TRUE) ?: [];
+      }
+      $raw_ok = (string) $body_text;
+      if ($raw_ok === '') {
+        return [];
+      }
+      $decoded_ok = json_decode($raw_ok, TRUE);
+      if (!is_array($decoded_ok)) {
+        throw new \Exception('Gemini API returned non-JSON body for HTTP ' . $code . ': ' . json_last_error_msg());
+      }
+      return $decoded_ok;
     }
 
     // For non-2xx responses, attempt to decode the body. Some Gemini
@@ -747,8 +803,21 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
       ];
     }
 
-    $error = is_string($body_text) ? $body_text : json_encode($body_text);
-    throw new \Exception("Gemini API error: " . $error);
+    // Prefer the parsed Gemini error.message to avoid leaking raw body content.
+    $parsed = is_string($body_text) ? json_decode($body_text, TRUE) : (is_array($body_text) ? $body_text : NULL);
+    if (isset($parsed['error']['message']) && is_string($parsed['error']['message'])) {
+      $error = $parsed['error']['message'];
+    }
+    elseif (!empty($response->error)) {
+      // Transport failures (timeout, DNS, TLS) come back as code -1 with an
+      // empty body; the cURL/socket message lives in ->error.
+      $error = trim((string) $response->error);
+    }
+    else {
+      $body_len = is_string($body_text) ? strlen($body_text) : 0;
+      $error = 'unexpected response (body length: ' . $body_len . ')';
+    }
+    throw new \Exception('Gemini API error (' . $code . '): ' . $error);
   }
 
   /**
@@ -763,7 +832,16 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
    *   A streaming HTTP response.
    */
   protected function handleStreamingRequest($url, array $body) {
-    $options           = $this->buildRequestOptions($body, [], 'POST', 300);
+    $options = [
+      'method' => 'POST',
+      'headers' => [
+        'Accept' => 'text/event-stream',
+        'Content-Type' => 'application/json',
+        'Authorization' => 'Bearer ' . $this->apiKey,
+      ],
+      'data' => json_encode($body),
+      'timeout' => 300,
+    ];
     $options['stream'] = TRUE;
 
     return new AIStreamingResponse($url, $options, function ($data) {
@@ -799,7 +877,7 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
 
       $url = $this->baseUrl . 'chat/completions';
       try {
-        $result = $this->dispatch($url, $payload, ['Authorization' => 'Bearer ' . $this->apiKey], 'POST', 60);
+        $result = $this->makeRequest($url, $payload, ['Authorization' => 'Bearer ' . $this->apiKey], 'POST', 300);
       }
       catch (\Exception $e) {
         watchdog('ai_provider_google_gemini', 'chatWithTools HTTP error: @msg', ['@msg' => $e->getMessage()], WATCHDOG_ERROR);
