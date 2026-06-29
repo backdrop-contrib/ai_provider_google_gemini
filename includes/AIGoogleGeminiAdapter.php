@@ -539,10 +539,13 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
    * {@inheritdoc}
    */
   public function embeddings(string $model, array $inputs, string $response_format = 'float'): array {
+    if ($response_format !== 'float') {
+      throw new \InvalidArgumentException('AIGoogleGeminiAdapter::embeddings() only supports response_format "float"; "' . $response_format . '" is not supported.');
+    }
     try {
       // Use the native embedContent endpoint; the body below is the native
       // shape (content.parts.text), not the OpenAI-compatible one.
-      $embedding_model = $model ?: 'text-embedding-004';
+      $embedding_model = $model ?: 'gemini-embedding-2';
       if (strpos($embedding_model, 'models/') !== FALSE) {
         $embedding_model = substr($embedding_model, strpos($embedding_model, 'models/') + strlen('models/'));
       }
@@ -709,11 +712,9 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
 
     // Treat any 2xx as success.
     if ($code >= 200 && $code < 300) {
-      if (is_array($body_text)) {
-        return $body_text;
-      }
-      if (is_object($body_text)) {
-        return (array) $body_text;
+      if (is_array($body_text) || is_object($body_text)) {
+        // JSON round-trip normalizes nested stdClass objects to arrays.
+        return json_decode(json_encode($body_text), TRUE) ?: [];
       }
       $raw_ok = (string) $body_text;
       if ($raw_ok === '') {
