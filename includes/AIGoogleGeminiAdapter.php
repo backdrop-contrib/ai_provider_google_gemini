@@ -565,16 +565,19 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
         ];
       }
 
-      $response = $this->makeRequest($url, ['requests' => $requests]);
+      $response = $this->makeRequest($url, ['requests' => $requests], [], 'POST', 300);
 
+      $seq = 0;
       foreach ($inputs as $index => $input) {
-        if (isset($response['embeddings'][$index]['values'])) {
-          $results[] = [
-            'object' => 'embedding',
-            'embedding' => $response['embeddings'][$index]['values'],
-            'index' => $index,
-          ];
+        if (!isset($response['embeddings'][$seq]['values']) || !is_array($response['embeddings'][$seq]['values'])) {
+          throw new \Exception('Gemini batchEmbedContents response missing vector for input index ' . $index . ' (request position ' . $seq . ')');
         }
+        $results[] = [
+          'object' => 'embedding',
+          'embedding' => $response['embeddings'][$seq]['values'],
+          'index' => $index,
+        ];
+        $seq++;
       }
 
       return [
@@ -706,10 +709,21 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
 
     // Treat any 2xx as success.
     if ($code >= 200 && $code < 300) {
-      // Guard the array return type: a 2xx with a non-JSON body would
-      // otherwise decode to NULL and raise a TypeError.
-      $decoded_ok = json_decode((string) $body_text, TRUE);
-      return is_array($decoded_ok) ? $decoded_ok : [];
+      if (is_array($body_text)) {
+        return $body_text;
+      }
+      if (is_object($body_text)) {
+        return (array) $body_text;
+      }
+      $raw_ok = (string) $body_text;
+      if ($raw_ok === '') {
+        return [];
+      }
+      $decoded_ok = json_decode($raw_ok, TRUE);
+      if (!is_array($decoded_ok)) {
+        throw new \Exception('Gemini API returned non-JSON body for HTTP ' . $code . ': ' . json_last_error_msg());
+      }
+      return $decoded_ok;
     }
 
     // For non-2xx responses, attempt to decode the body. Some Gemini
@@ -788,18 +802,19 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
       ];
     }
 
-    $error = is_string($body_text) ? trim($body_text) : json_encode($body_text);
-    if ($error === '' && !empty($response->error)) {
+    // Prefer the parsed Gemini error.message to avoid leaking raw body content.
+    $parsed = is_string($body_text) ? json_decode($body_text, TRUE) : (is_array($body_text) ? $body_text : NULL);
+    if (isset($parsed['error']['message']) && is_string($parsed['error']['message'])) {
+      $error = $parsed['error']['message'];
+    }
+    elseif (!empty($response->error)) {
       // Transport failures (timeout, DNS, TLS) come back as code -1 with an
       // empty body; the cURL/socket message lives in ->error.
       $error = trim((string) $response->error);
     }
-    if ($error === '') {
-      $error = 'Unknown error';
-    }
-    // Truncate to prevent unbounded payloads from leaking into logs.
-    if (strlen($error) > 500) {
-      $error = substr($error, 0, 500) . '… [truncated]';
+    else {
+      $body_len = is_string($body_text) ? strlen($body_text) : 0;
+      $error = 'unexpected response (body length: ' . $body_len . ')';
     }
     throw new \Exception('Gemini API error (' . $code . '): ' . $error);
   }
