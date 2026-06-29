@@ -551,26 +551,27 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
       }
       $results = [];
 
-      $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . $embedding_model . ':embedContent?key=' . urlencode($this->apiKey);
+      $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . $embedding_model . ':batchEmbedContents?key=' . urlencode($this->apiKey);
 
-      foreach ($inputs as $index => $input) {
-        $body = [
+      $requests = [];
+      foreach ($inputs as $input) {
+        $requests[] = [
           'model' => 'models/' . $embedding_model,
           'content' => [
             'parts' => [
-              [
-                'text' => $input,
-              ],
+              ['text' => $input],
             ],
           ],
         ];
+      }
 
-        $response = $this->makeRequest($url, $body);
+      $response = $this->makeRequest($url, ['requests' => $requests]);
 
-        if (isset($response['embedding']['values'])) {
+      foreach ($inputs as $index => $input) {
+        if (isset($response['embeddings'][$index]['values'])) {
           $results[] = [
             'object' => 'embedding',
-            'embedding' => $response['embedding']['values'],
+            'embedding' => $response['embeddings'][$index]['values'],
             'index' => $index,
           ];
         }
@@ -795,6 +796,10 @@ class AIGoogleGeminiAdapter extends AIAdapterBase {
     }
     if ($error === '') {
       $error = 'Unknown error';
+    }
+    // Truncate to prevent unbounded payloads from leaking into logs.
+    if (strlen($error) > 500) {
+      $error = substr($error, 0, 500) . '… [truncated]';
     }
     throw new \Exception('Gemini API error (' . $code . '): ' . $error);
   }
