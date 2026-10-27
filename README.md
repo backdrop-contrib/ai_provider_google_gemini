@@ -8,7 +8,7 @@ Google Gemini provider for the Backdrop CMS AI module.
 
 ## Issues
 
-Bugs and feature requests should be reported in the [Issue Queue](https://github.com/backdrop-contrib/ai_provider_google gemini/issues).
+Bugs and feature requests should be reported in the [Issue Queue](https://github.com/backdrop-contrib/ai_provider_google_gemini/issues).
 
 ## Current Maintainer
 
